@@ -96,20 +96,23 @@ export default function AssessmentPage() {
         </section>
 
         <div className="mt-8 flex items-center gap-3">
-          <a
-            type="button"
-            className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-gray-50"
-          >
-            뒤로
-          </button>
+  <button
+    type="button"
+    className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+    onClick={() => router.push('/')}
+  >
+    뒤로
+  </button>
 
-          <button
-            className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-            onClick={goResult}
-          >
-            루틴 추천 받기
-          </button>
-        </div>
+  <button
+    type="button"
+    className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+    onClick={goResult}
+  >
+    루틴 추천 받기
+  </button>
+</div>
+
 
         <p className="mt-4 text-xs text-gray-500">
           * 1차 MVP는 체크 결과를 저장하고 결과 페이지로 이동합니다.
