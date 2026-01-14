@@ -114,16 +114,63 @@ function weekdayOfFirst(y: number, m1: number) {
   return new Date(y, m1 - 1, 1).getDay();
 }
 
+function startOfMonthISO(iso: string) {
+  const { y, m1 } = parseISO(iso);
+  return isoFromParts(y, m1, 1);
+}
+
+function shiftMonthISO(monthISO: string, delta: number) {
+  const { y, m1 } = parseISO(monthISO); // monthISO는 YYYY-MM-01 형태라고 가정
+  const d = new Date(y, (m1 - 1) + delta, 1);
+  const yy = d.getFullYear();
+  const mm = d.getMonth() + 1;
+  return isoFromParts(yy, mm, 1);
+}
+
+// Calendar button styles (needed before component)
+const iconBtn: React.CSSProperties = {
+  border: "1px solid #eee",
+  background: "#fff",
+  width: 36,
+  height: 36,
+  borderRadius: 12,
+  cursor: "pointer",
+  fontSize: 18,
+  lineHeight: "34px",
+  textAlign: "center",
+};
+
+const btnMini: React.CSSProperties = {
+  border: "1px solid #eee",
+  background: "#fff",
+  padding: "8px 10px",
+  borderRadius: 12,
+  cursor: "pointer",
+  fontSize: 13,
+};
+
 function CalendarMonthHome({
   focusISO,
   countsByDate,
   monthTotal,
+  selectedISO,
+  onSelectDate,
 }: {
   focusISO: string;
   countsByDate: Record<string, number>;
   monthTotal: number;
+  selectedISO: string;
+  onSelectDate: (iso: string) => void;
 }) {
-  const { y, m1 } = parseISO(focusISO);
+  // ✅ "보고 있는 월" (YYYY-MM-01)
+  const [viewMonthISO, setViewMonthISO] = React.useState(() => startOfMonthISO(focusISO));
+
+  // ✅ 선택된 날짜가 다른 달이면, 그 달을 자동으로 보여주기(UX 좋아짐)
+  React.useEffect(() => {
+    setViewMonthISO(startOfMonthISO(selectedISO));
+  }, [selectedISO]);
+
+  const { y, m1 } = parseISO(viewMonthISO);
   const firstW = weekdayOfFirst(y, m1);
   const dim = daysInMonth(y, m1);
 
@@ -135,18 +182,46 @@ function CalendarMonthHome({
 
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
 
+  const onPrevMonth = () => setViewMonthISO((prev) => shiftMonthISO(prev, -1));
+  const onNextMonth = () => setViewMonthISO((prev) => shiftMonthISO(prev, +1));
+
+  // ✅ "이번 달 수업"을 '현재 보고 있는 달' 기준으로 보여주고 싶으면 여기서 계산
+  const viewMonthPrefix = `${y}-${String(m1).padStart(2, "0")}-`;
+  const viewMonthTotal = Object.entries(countsByDate).reduce((sum, [iso, cnt]) => {
+    if (iso.startsWith(viewMonthPrefix)) return sum + cnt;
+    return sum;
+  }, 0);
+
   return (
     <div style={panel}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-end" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
         <div>
           <div style={{ fontWeight: 900, fontSize: 16 }}>
             {y}년 {m1}월
           </div>
           <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>
-            이번 달 수업: <b>{monthTotal}</b>건
+            {/* 기존 monthTotal은 "이번 달(오늘 기준)"이었는데,
+                월 이동하면 혼동되니까 "현재 보고 있는 달" 기준으로 보여주는 걸 추천 */}
+            이 달 수업: <b>{viewMonthTotal}</b>건
           </div>
         </div>
-        <Link href="/schedule" style={linkBtn}>일정 관리</Link>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={onPrevMonth} style={iconBtn} aria-label="이전 달">
+            ‹
+          </button>
+          <button
+            onClick={() => setViewMonthISO(startOfMonthISO(todayISO()))}
+            style={btnMini}
+            aria-label="이번 달"
+          >
+            이번 달
+          </button>
+          <button onClick={onNextMonth} style={iconBtn} aria-label="다음 달">
+            ›
+          </button>
+          <Link href="/schedule" style={linkBtn}>일정 관리</Link>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginTop: 10 }}>
@@ -159,23 +234,35 @@ function CalendarMonthHome({
         {cells.map((c, idx) => {
           const cnt = c.iso ? (countsByDate[c.iso] || 0) : 0;
           const isToday = c.iso === todayISO();
+          const isSelected = c.iso && c.iso === selectedISO;
+
+          const bg = isSelected ? "#111" : "#fff";
+          const color = isSelected ? "#fff" : "#111";
+          const border = isSelected ? "1px solid #111" : isToday ? "1px solid #111" : "1px solid #eee";
+
           return (
             <div
               key={idx}
+              onClick={() => {
+                if (c.iso) onSelectDate(c.iso);
+              }}
               style={{
-                border: "1px solid #eee",
-                background: isToday ? "#111" : "#fff",
-                color: isToday ? "#fff" : "#111",
+                border,
+                background: bg,
+                color,
                 borderRadius: 12,
                 padding: "10px 0",
                 textAlign: "center",
                 opacity: c.iso ? 1 : 0.35,
                 position: "relative",
                 fontSize: 13,
+                cursor: c.iso ? "pointer" : "default",
+                userSelect: "none",
               }}
               title={c.iso ?? ""}
             >
               {c.day ?? ""}
+
               {cnt > 0 ? (
                 <span
                   style={{
@@ -186,8 +273,8 @@ function CalendarMonthHome({
                     padding: "2px 7px",
                     fontSize: 11,
                     fontWeight: 900,
-                    background: isToday ? "#fff" : "#111",
-                    color: isToday ? "#111" : "#fff",
+                    background: isSelected ? "#fff" : "#111",
+                    color: isSelected ? "#111" : "#fff",
                   }}
                 >
                   {cnt}
@@ -196,11 +283,6 @@ function CalendarMonthHome({
             </div>
           );
         })}
-      </div>
-
-      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Link href="/schedule" style={btnOutline}>+ 수업 추가</Link>
-        <Link href="/workout-log" style={btnPrimary}>운동일지 작성</Link>
       </div>
     </div>
   );
@@ -216,6 +298,7 @@ export default function AdminHome() {
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberPhone, setNewMemberPhone] = useState("");
   const [toast, setToast] = useState("");
+  const [selectedDateISO, setSelectedDateISO] = useState<string>(todayISO());
 
   useEffect(() => {
     setEvents(safeParse<ScheduleEvent[]>(localStorage.getItem(LS_KEYS.EVENTS), []));
@@ -305,6 +388,12 @@ export default function AdminHome() {
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [events]);
 
+  const selectedEvents = useMemo(() => {
+    return events
+      .filter((e) => e.dateISO === selectedDateISO && e.status !== "취소")
+      .sort((a, b) => a.time.localeCompare(b.time));
+  }, [events, selectedDateISO]);
+
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: 18 }}>
       <header style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -349,31 +438,51 @@ export default function AdminHome() {
       {/* main layout: calendar + old dashboard blocks */}
       <section style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 12, marginTop: 12 }}>
         {/* Left: calendar */}
-        <CalendarMonthHome focusISO={todayISO()} countsByDate={countsByDate} monthTotal={monthTotal} />
+        <CalendarMonthHome 
+          focusISO={todayISO()} 
+          countsByDate={countsByDate} 
+          monthTotal={monthTotal}
+          selectedISO={selectedDateISO}
+          onSelectDate={setSelectedDateISO}
+        />
 
         {/* Right: stacks */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {/* Today schedule */}
+          {/* Selected date schedule */}
           <div style={panel}>
             <div style={panelHead}>
               <div>
-                <div style={panelTitle}>오늘 수업</div>
-                <div style={panelSub}>{formatKoreanDate(todayISO())}</div>
+                <div style={panelTitle}>
+                  {selectedDateISO === todayISO() ? "오늘 수업" : "선택한 날짜 수업"}
+                </div>
+                <div style={panelSub}>{formatKoreanDate(selectedDateISO)}</div>
               </div>
               <Link href="/schedule" style={linkBtn}>일정 열기</Link>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-              {todayEvents.length === 0 ? (
-                <div style={{ color: "#777" }}>오늘 수업이 없어.</div>
+              {selectedEvents.length === 0 ? (
+                <div style={{ color: "#777" }}>
+                  {selectedDateISO === todayISO() ? "오늘 수업이 없어." : "선택한 날짜에 수업이 없어."}
+                </div>
               ) : (
-                todayEvents.map((e) => (
+                selectedEvents.map((e) => (
                   <div key={e.id} style={row}>
                     <div>
-                      <div style={{ fontWeight: 900 }}>{e.time} · {e.memberName}</div>
-                      <div style={{ color: "#666", fontSize: 13, marginTop: 2 }}>{e.durationMin}분 {e.note ? `· ${e.note}` : ""}</div>
+                      <div style={{ fontWeight: 900 }}>
+                        {e.time} · {e.memberName}
+                      </div>
+                      <div style={{ color: "#666", fontSize: 13, marginTop: 2 }}>
+                        {e.durationMin}분 {e.note ? `· ${e.note}` : ""}
+                      </div>
                     </div>
-                    <span style={pill}>{e.status}</span>
+
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={pill}>{e.status}</span>
+
+                      {/* 선택한 날짜 수업에서 바로 운동일지로 가고 싶으면(옵션) */}
+                      <Link href="/workout-log" style={btnTiny}>운동일지</Link>
+                    </div>
                   </div>
                 ))
               )}
@@ -776,4 +885,25 @@ const input: React.CSSProperties = {
   borderRadius: 12,
   padding: "10px 12px",
   outline: "none",
+};
+
+const iconBtn: React.CSSProperties = {
+  border: "1px solid #eee",
+  background: "#fff",
+  width: 36,
+  height: 36,
+  borderRadius: 12,
+  cursor: "pointer",
+  fontSize: 18,
+  lineHeight: "34px",
+  textAlign: "center",
+};
+
+const btnMini: React.CSSProperties = {
+  border: "1px solid #eee",
+  background: "#fff",
+  padding: "8px 10px",
+  borderRadius: 12,
+  cursor: "pointer",
+  fontSize: 13,
 };
