@@ -240,12 +240,18 @@ function CalendarMonthHome({
           const color = isSelected ? "#fff" : "#111";
           const border = isSelected ? "1px solid #111" : isToday ? "1px solid #111" : "1px solid #eee";
 
+          const handleDateClick = (e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (c.iso) {
+              onSelectDate(c.iso);
+            }
+          };
+
           return (
             <div
               key={idx}
-              onClick={() => {
-                if (c.iso) onSelectDate(c.iso);
-              }}
+              onClick={handleDateClick}
               style={{
                 border,
                 background: bg,
@@ -258,8 +264,19 @@ function CalendarMonthHome({
                 fontSize: 13,
                 cursor: c.iso ? "pointer" : "default",
                 userSelect: "none",
+                transition: "all 0.15s ease",
               }}
-              title={c.iso ?? ""}
+              onMouseEnter={(e) => {
+                if (c.iso && !isSelected) {
+                  e.currentTarget.style.background = "#f5f5f5";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (c.iso && !isSelected) {
+                  e.currentTarget.style.background = "#fff";
+                }
+              }}
+              title={c.iso ? `${formatKoreanDate(c.iso)} - ${cnt}건의 수업` : ""}
             >
               {c.day ?? ""}
 
@@ -455,32 +472,32 @@ export default function AdminHome() {
                 <div style={panelTitle}>
                   {selectedDateISO === todayISO() ? "오늘 수업" : "선택한 날짜 수업"}
                 </div>
-                <div style={panelSub}>{formatKoreanDate(selectedDateISO)}</div>
+                <div style={panelSub}>
+                  {formatKoreanDate(selectedDateISO)} · 총 {selectedEvents.length}건
+                </div>
               </div>
               <Link href="/schedule" style={linkBtn}>일정 열기</Link>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
               {selectedEvents.length === 0 ? (
-                <div style={{ color: "#777" }}>
+                <div style={{ color: "#777", padding: "20px 0", textAlign: "center" }}>
                   {selectedDateISO === todayISO() ? "오늘 수업이 없어." : "선택한 날짜에 수업이 없어."}
                 </div>
               ) : (
                 selectedEvents.map((e) => (
                   <div key={e.id} style={row}>
-                    <div>
-                      <div style={{ fontWeight: 900 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 900, fontSize: 15 }}>
                         {e.time} · {e.memberName}
                       </div>
-                      <div style={{ color: "#666", fontSize: 13, marginTop: 2 }}>
+                      <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>
                         {e.durationMin}분 {e.note ? `· ${e.note}` : ""}
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
                       <span style={pill}>{e.status}</span>
-
-                      {/* 선택한 날짜 수업에서 바로 운동일지로 가고 싶으면(옵션) */}
                       <Link href="/workout-log" style={btnTiny}>운동일지</Link>
                     </div>
                   </div>
