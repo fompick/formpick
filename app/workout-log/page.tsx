@@ -3,6 +3,19 @@
 
 import React, { useMemo, useState } from "react";
 
+function todayISO() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatKoreanDate(iso: string) {
+  const [y, m, d] = iso.split("-");
+  return `${y}년 ${Number(m)}월 ${Number(d)}일`;
+}
+
 type BodyPart = "가슴" | "등" | "하체" | "어깨" | "이두" | "삼두" | "복근";
 
 type SetRow = {
@@ -62,8 +75,70 @@ function createDefaultExercise(): ExerciseLog {
 
 export default function WorkoutLogPage() {
   const [logs, setLogs] = useState<ExerciseLog[]>([createDefaultExercise()]);
+  const [selectedDate, setSelectedDate] = useState<string>(todayISO());
+  const [toast, setToast] = useState<string>("");
 
   const totalSets = useMemo(() => logs.reduce((sum, l) => sum + l.sets.length, 0), [logs]);
+
+  // 운동일지 메시지 생성 함수
+  const generateWorkoutMessage = useMemo(() => {
+    const lines: string[] = [];
+    
+    lines.push(`📌 운동일지 (${formatKoreanDate(selectedDate)})`);
+    lines.push("");
+    
+    // 실제 기록된 운동만 필터링
+    const validLogs = logs.filter(log => 
+      log.sets.some(set => set.weightKg > 0 || set.reps > 0)
+    );
+    
+    if (validLogs.length === 0) {
+      lines.push("오늘 기록된 운동이 없습니다.");
+    } else {
+      validLogs.forEach((log, idx) => {
+        const desc = log.exerciseDescription.trim() ? ` (${log.exerciseDescription.trim()})` : "";
+        lines.push(`${idx + 1}) [${log.bodyPart}] ${log.exerciseName}${desc}`);
+        
+        // 실제 기록된 세트만 표시
+        const validSets = log.sets.filter(set => set.weightKg > 0 || set.reps > 0);
+        validSets.forEach((set, setIdx) => {
+          const memo = set.memo.trim() ? ` / 메모: ${set.memo.trim()}` : "";
+          lines.push(`   ${setIdx + 1}세트: ${set.weightKg}kg × ${set.reps}회 (RPE ${set.rpe})${memo}`);
+        });
+        
+        lines.push("");
+      });
+      
+      // 총 볼륨 계산
+      const totalVolume = validLogs.reduce((sum, log) => {
+        return sum + log.sets.reduce((setSum, set) => {
+          return setSum + (set.weightKg * set.reps);
+        }, 0);
+      }, 0);
+      
+      lines.push(`📊 오늘 운동량 요약`);
+      lines.push(`- 총 세트: ${validLogs.reduce((sum, log) => sum + log.sets.filter(s => s.weightKg > 0 || s.reps > 0).length, 0)}세트`);
+      if (totalVolume > 0) {
+        lines.push(`- 총 볼륨: ${totalVolume.toLocaleString()}kg`);
+      }
+      lines.push("");
+    }
+    
+    lines.push("👍 수고하셨어요!");
+    
+    return lines.join("\n");
+  }, [logs, selectedDate]);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(generateWorkoutMessage);
+      setToast("복사 완료! 카카오톡에 붙여넣기 하세요 📋");
+      setTimeout(() => setToast(""), 2000);
+    } catch (err) {
+      setToast("복사 실패 😥");
+      setTimeout(() => setToast(""), 2000);
+    }
+  };
 
   const addExercise = () => setLogs((prev) => [...prev, createDefaultExercise()]);
 
@@ -109,12 +184,50 @@ export default function WorkoutLogPage() {
           </p>
         </div>
 
-        <button
-          onClick={addExercise}
-          className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50"
-        >
-          + 운동 추가
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={addExercise}
+            className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            + 운동 추가
+          </button>
+          <button
+            onClick={copyToClipboard}
+            className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+          >
+            📋 카카오톡 복사
+          </button>
+        </div>
+      </div>
+
+      {/* 날짜 선택 */}
+      <div className="mb-4">
+        <label className="mb-2 block text-sm font-medium text-gray-700">운동 날짜</label>
+        <input
+          type="date"
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+          className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+        />
+        <div className="mt-1 text-xs text-gray-500">
+          선택한 날짜: {formatKoreanDate(selectedDate)}
+        </div>
+      </div>
+
+      {/* 미리보기 */}
+      <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-700">카카오톡 메시지 미리보기</h3>
+          <button
+            onClick={copyToClipboard}
+            className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+          >
+            복사
+          </button>
+        </div>
+        <pre className="whitespace-pre-wrap break-words rounded-lg bg-white p-3 text-xs text-gray-800">
+          {generateWorkoutMessage}
+        </pre>
       </div>
 
       <div className="space-y-4">
@@ -273,6 +386,16 @@ export default function WorkoutLogPage() {
       <div className="mt-4 text-sm text-gray-600">
         총 세트: <span className="font-semibold">{totalSets}</span>
       </div>
+
+      {/* Toast 메시지 */}
+      {toast && (
+        <div
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2 text-sm text-white shadow-lg"
+          style={{ zIndex: 1000 }}
+        >
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
