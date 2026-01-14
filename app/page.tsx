@@ -127,28 +127,6 @@ function shiftMonthISO(monthISO: string, delta: number) {
   return isoFromParts(yy, mm, 1);
 }
 
-// Calendar button styles (needed before component)
-const iconBtn: React.CSSProperties = {
-  border: "1px solid #eee",
-  background: "#fff",
-  width: 36,
-  height: 36,
-  borderRadius: 12,
-  cursor: "pointer",
-  fontSize: 18,
-  lineHeight: "34px",
-  textAlign: "center",
-};
-
-const btnMini: React.CSSProperties = {
-  border: "1px solid #eee",
-  background: "#fff",
-  padding: "8px 10px",
-  borderRadius: 12,
-  cursor: "pointer",
-  fontSize: 13,
-};
-
 function CalendarMonthHome({
   focusISO,
   countsByDate,
@@ -192,6 +170,28 @@ function CalendarMonthHome({
     return sum;
   }, 0);
 
+  // Calendar button styles (defined here to use iconBtn and btnMini from bottom of file)
+  const calendarIconBtn: React.CSSProperties = {
+    border: "1px solid #eee",
+    background: "#fff",
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    cursor: "pointer",
+    fontSize: 18,
+    lineHeight: "34px",
+    textAlign: "center",
+  };
+
+  const calendarBtnMini: React.CSSProperties = {
+    border: "1px solid #eee",
+    background: "#fff",
+    padding: "8px 10px",
+    borderRadius: 12,
+    cursor: "pointer",
+    fontSize: 13,
+  };
+
   return (
     <div style={panel}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
@@ -207,17 +207,17 @@ function CalendarMonthHome({
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button onClick={onPrevMonth} style={iconBtn} aria-label="이전 달">
+          <button onClick={onPrevMonth} style={calendarIconBtn} aria-label="이전 달">
             ‹
           </button>
           <button
             onClick={() => setViewMonthISO(startOfMonthISO(todayISO()))}
-            style={btnMini}
+            style={calendarBtnMini}
             aria-label="이번 달"
           >
             이번 달
           </button>
-          <button onClick={onNextMonth} style={iconBtn} aria-label="다음 달">
+          <button onClick={onNextMonth} style={calendarIconBtn} aria-label="다음 달">
             ›
           </button>
           <Link href="/schedule" style={linkBtn}>일정 관리</Link>
