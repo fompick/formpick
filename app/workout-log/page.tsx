@@ -1,7 +1,35 @@
 // app/workout-log/page.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+
+const LS_KEY_EXERCISE_NAMES = "formpick_exercise_names_v1";
+
+function safeParse<T>(v: string | null, fallback: T): T {
+  try {
+    if (!v) return fallback;
+    return JSON.parse(v) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadExerciseNames(): string[] {
+  return safeParse<string[]>(localStorage.getItem(LS_KEY_EXERCISE_NAMES), []);
+}
+
+function saveExerciseName(name: string) {
+  if (!name.trim()) return;
+  
+  const names = loadExerciseNames();
+  const trimmedName = name.trim();
+  
+  // 중복 제거
+  if (!names.includes(trimmedName)) {
+    const updated = [trimmedName, ...names].slice(0, 100); // 최대 100개 저장
+    localStorage.setItem(LS_KEY_EXERCISE_NAMES, JSON.stringify(updated));
+  }
+}
 
 function todayISO() {
   const d = new Date();
@@ -40,19 +68,6 @@ function uid(prefix = "id") {
 
 const BODY_PARTS: BodyPart[] = ["가슴", "등", "하체", "어깨", "이두", "삼두", "복근"];
 
-// 샘플 운동명(=기구/운동 카테고리)을 필요한 만큼 추가해줘
-const EXERCISE_NAMES = [
-  "레그프레스",
-  "스쿼트",
-  "벤치프레스",
-  "랫풀다운",
-  "시티드로우",
-  "숄더프레스",
-  "케이블컬",
-  "케이블푸시다운",
-  "크런치",
-];
-
 function createDefaultSet(): SetRow {
   return {
     id: uid("set"),
@@ -64,10 +79,11 @@ function createDefaultSet(): SetRow {
 }
 
 function createDefaultExercise(): ExerciseLog {
+  const savedNames = loadExerciseNames();
   return {
     id: uid("ex"),
     bodyPart: "하체",
-    exerciseName: "레그프레스",
+    exerciseName: savedNames[0] || "",
     exerciseDescription: "",
     sets: [createDefaultSet(), createDefaultSet(), createDefaultSet()],
   };
@@ -76,15 +92,28 @@ function createDefaultExercise(): ExerciseLog {
 export default function WorkoutLogPage() {
   const [logs, setLogs] = useState<ExerciseLog[]>([createDefaultExercise()]);
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
+  const [memberName, setMemberName] = useState<string>("");
   const [toast, setToast] = useState<string>("");
+  const [exerciseNames, setExerciseNames] = useState<string[]>(loadExerciseNames());
 
   const totalSets = useMemo(() => logs.reduce((sum, l) => sum + l.sets.length, 0), [logs]);
 
-  // 운동일지 메시지 생성 함수
+  // 운동명 목록 로드
+  useEffect(() => {
+    setExerciseNames(loadExerciseNames());
+  }, []);
+
+  // 카카오톡 전송용 운동일지 텍스트 생성 함수
   const generateWorkoutMessage = useMemo(() => {
     const lines: string[] = [];
     
-    lines.push(`📌 운동일지 (${formatKoreanDate(selectedDate)})`);
+    lines.push("[오늘운동 PT 기록]");
+    lines.push("");
+    
+    if (memberName.trim()) {
+      lines.push(`회원: ${memberName.trim()}`);
+    }
+    lines.push(`날짜: ${formatKoreanDate(selectedDate)}`);
     lines.push("");
     
     // 실제 기록된 운동만 필터링
@@ -95,39 +124,53 @@ export default function WorkoutLogPage() {
     if (validLogs.length === 0) {
       lines.push("오늘 기록된 운동이 없습니다.");
     } else {
-      validLogs.forEach((log, idx) => {
-        const desc = log.exerciseDescription.trim() ? ` (${log.exerciseDescription.trim()})` : "";
-        lines.push(`${idx + 1}) [${log.bodyPart}] ${log.exerciseName}${desc}`);
-        
-        // 실제 기록된 세트만 표시
-        const validSets = log.sets.filter(set => set.weightKg > 0 || set.reps > 0);
-        validSets.forEach((set, setIdx) => {
-          const memo = set.memo.trim() ? ` / 메모: ${set.memo.trim()}` : "";
-          lines.push(`   ${setIdx + 1}세트: ${set.weightKg}kg × ${set.reps}회 (RPE ${set.rpe})${memo}`);
-        });
-        
-        lines.push("");
+      // 부위별로 그룹화
+      const groupedByPart: Record<string, ExerciseLog[]> = {};
+      validLogs.forEach(log => {
+        if (!groupedByPart[log.bodyPart]) {
+          groupedByPart[log.bodyPart] = [];
+        }
+        groupedByPart[log.bodyPart].push(log);
       });
       
-      // 총 볼륨 계산
-      const totalVolume = validLogs.reduce((sum, log) => {
-        return sum + log.sets.reduce((setSum, set) => {
-          return setSum + (set.weightKg * set.reps);
-        }, 0);
-      }, 0);
-      
-      lines.push(`📊 오늘 운동량 요약`);
-      lines.push(`- 총 세트: ${validLogs.reduce((sum, log) => sum + log.sets.filter(s => s.weightKg > 0 || s.reps > 0).length, 0)}세트`);
-      if (totalVolume > 0) {
-        lines.push(`- 총 볼륨: ${totalVolume.toLocaleString()}kg`);
-      }
-      lines.push("");
+      // 부위별로 정리해서 출력
+      Object.entries(groupedByPart).forEach(([bodyPart, partLogs]) => {
+        lines.push(`▶ ${bodyPart}`);
+        
+        partLogs.forEach(log => {
+          lines.push(`- ${log.exerciseName}`);
+          
+          // 실제 기록된 세트만 표시
+          const validSets = log.sets.filter(set => set.weightKg > 0 || set.reps > 0);
+          validSets.forEach((set, setIdx) => {
+            lines.push(`  ${setIdx + 1}세트: ${set.weightKg}kg x ${set.reps}회 (RPE ${set.rpe})`);
+          });
+          
+          // 운동별 메모가 있으면 표시
+          const exerciseMemos = validSets
+            .map(set => set.memo.trim())
+            .filter(memo => memo)
+            .join(", ");
+          
+          if (exerciseMemos) {
+            lines.push(`  메모: ${exerciseMemos}`);
+          }
+          
+          // 운동설명이 있으면 표시
+          if (log.exerciseDescription.trim()) {
+            lines.push(`  참고: ${log.exerciseDescription.trim()}`);
+          }
+          
+          lines.push("");
+        });
+      });
     }
     
-    lines.push("👍 수고하셨어요!");
+    lines.push("수고 많으셨어요 😊");
+    lines.push("다음 수업 때 컨디션 체크해서 중량 조절할게요!");
     
     return lines.join("\n");
-  }, [logs, selectedDate]);
+  }, [logs, selectedDate, memberName]);
 
   const copyToClipboard = async () => {
     try {
@@ -145,8 +188,25 @@ export default function WorkoutLogPage() {
   const removeExercise = (exerciseId: string) =>
     setLogs((prev) => prev.filter((l) => l.id !== exerciseId));
 
-  const updateExercise = (exerciseId: string, patch: Partial<ExerciseLog>) =>
-    setLogs((prev) => prev.map((l) => (l.id === exerciseId ? { ...l, ...patch } : l)));
+  const updateExercise = (exerciseId: string, patch: Partial<ExerciseLog>) => {
+    setLogs((prev) => {
+      const updated = prev.map((l) => {
+        if (l.id !== exerciseId) return l;
+        const newLog = { ...l, ...patch };
+        
+        // 운동명이 변경되었으면 localStorage에 저장
+        if (patch.exerciseName !== undefined && patch.exerciseName.trim()) {
+          saveExerciseName(patch.exerciseName);
+          // 목록 업데이트
+          const updatedNames = loadExerciseNames();
+          setExerciseNames(updatedNames);
+        }
+        
+        return newLog;
+      });
+      return updated;
+    });
+  };
 
   const addSet = (exerciseId: string) =>
     setLogs((prev) =>
@@ -195,22 +255,37 @@ export default function WorkoutLogPage() {
             onClick={copyToClipboard}
             className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
           >
-            📋 카카오톡 복사
+            카카오톡으로 보내기
           </button>
         </div>
       </div>
 
-      {/* 날짜 선택 */}
-      <div className="mb-4">
-        <label className="mb-2 block text-sm font-medium text-gray-700">운동 날짜</label>
-        <input
-          type="date"
-          value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
-          className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
-        />
-        <div className="mt-1 text-xs text-gray-500">
-          선택한 날짜: {formatKoreanDate(selectedDate)}
+      {/* 날짜 및 회원명 선택 */}
+      <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div>
+          <label className="mb-2 block text-sm font-medium text-gray-700">운동 날짜</label>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+          />
+          <div className="mt-1 text-xs text-gray-500">
+            선택한 날짜: {formatKoreanDate(selectedDate)}
+          </div>
+        </div>
+        <div>
+          <label className="mb-2 block text-sm font-medium text-gray-700">회원명 (선택)</label>
+          <input
+            type="text"
+            value={memberName}
+            onChange={(e) => setMemberName(e.target.value)}
+            placeholder="예: 김OO"
+            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+          />
+          <div className="mt-1 text-xs text-gray-500">
+            카카오톡 메시지에 회원명이 포함됩니다
+          </div>
         </div>
       </div>
 
@@ -256,17 +331,26 @@ export default function WorkoutLogPage() {
               {/* 운동명 (기존 "기구") */}
               <div className="md:col-span-4">
                 <label className="mb-1 block text-xs font-medium text-gray-600">운동명</label>
-                <select
+                <input
+                  type="text"
+                  list={`exercise-names-${log.id}`}
                   value={log.exerciseName}
                   onChange={(e) => updateExercise(log.id, { exerciseName: e.target.value })}
+                  onBlur={(e) => {
+                    // 입력 완료 시 저장
+                    if (e.target.value.trim()) {
+                      saveExerciseName(e.target.value);
+                      setExerciseNames(loadExerciseNames());
+                    }
+                  }}
+                  placeholder="예: 레그프레스, 레그프레스(발 A), 벤치프레스 인클라인"
                   className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                >
-                  {EXERCISE_NAMES.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
+                />
+                <datalist id={`exercise-names-${log.id}`}>
+                  {exerciseNames.map((name) => (
+                    <option key={name} value={name} />
                   ))}
-                </select>
+                </datalist>
               </div>
 
               {/* 운동설명 (기존 "운동명") */}
