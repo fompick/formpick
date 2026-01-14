@@ -14,20 +14,36 @@ function safeParse<T>(v: string | null, fallback: T): T {
   }
 }
 
+function normalizeName(name: string) {
+  return name.trim().replace(/\s+/g, " ");
+}
+
 function loadExerciseNames(): string[] {
-  return safeParse<string[]>(localStorage.getItem(LS_KEY_EXERCISE_NAMES), []);
+  try {
+    const raw = localStorage.getItem(LS_KEY_EXERCISE_NAMES);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as string[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveExerciseNames(names: string[]) {
+  localStorage.setItem(LS_KEY_EXERCISE_NAMES, JSON.stringify(names));
 }
 
 function saveExerciseName(name: string) {
   if (!name.trim()) return;
   
   const names = loadExerciseNames();
-  const trimmedName = name.trim();
+  const trimmedName = normalizeName(name);
   
-  // 중복 제거
-  if (!names.includes(trimmedName)) {
-    const updated = [trimmedName, ...names].slice(0, 100); // 최대 100개 저장
-    localStorage.setItem(LS_KEY_EXERCISE_NAMES, JSON.stringify(updated));
+  // 중복 제거 (대소문자 무시)
+  const exists = names.some((n) => normalizeName(n).toLowerCase() === trimmedName.toLowerCase());
+  if (!exists) {
+    const updated = [trimmedName, ...names].slice(0, 200); // 최대 200개 저장
+    saveExerciseNames(updated);
   }
 }
 
@@ -94,7 +110,7 @@ export default function WorkoutLogPage() {
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
   const [memberName, setMemberName] = useState<string>("");
   const [toast, setToast] = useState<string>("");
-  const [exerciseNames, setExerciseNames] = useState<string[]>(loadExerciseNames());
+  const [exerciseNames, setExerciseNames] = useState<string[]>([]);
 
   const totalSets = useMemo(() => logs.reduce((sum, l) => sum + l.sets.length, 0), [logs]);
 
@@ -102,6 +118,33 @@ export default function WorkoutLogPage() {
   useEffect(() => {
     setExerciseNames(loadExerciseNames());
   }, []);
+
+  // 토스트 메시지 표시 함수
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(""), 1500);
+  }
+
+  // 운동명 추가 함수
+  function addExerciseName(nameToAdd: string) {
+    const value = normalizeName(nameToAdd);
+    if (!value) {
+      showToast("운동명을 입력해줘!");
+      return;
+    }
+
+    // 중복 체크(대소문자 무시)
+    const exists = exerciseNames.some((n) => normalizeName(n).toLowerCase() === value.toLowerCase());
+    if (exists) {
+      showToast("이미 있는 운동명이야!");
+      return;
+    }
+
+    const next = [value, ...exerciseNames].slice(0, 200); // 너무 커지지 않게 200개 제한
+    setExerciseNames(next);
+    saveExerciseNames(next);
+    showToast("운동명 추가 완료 ✅");
+  }
 
   // 카카오톡 전송용 운동일지 텍스트 생성 함수
   const generateWorkoutMessage = useMemo(() => {
@@ -189,23 +232,7 @@ export default function WorkoutLogPage() {
     setLogs((prev) => prev.filter((l) => l.id !== exerciseId));
 
   const updateExercise = (exerciseId: string, patch: Partial<ExerciseLog>) => {
-    setLogs((prev) => {
-      const updated = prev.map((l) => {
-        if (l.id !== exerciseId) return l;
-        const newLog = { ...l, ...patch };
-        
-        // 운동명이 변경되었으면 localStorage에 저장
-        if (patch.exerciseName !== undefined && patch.exerciseName.trim()) {
-          saveExerciseName(patch.exerciseName);
-          // 목록 업데이트
-          const updatedNames = loadExerciseNames();
-          setExerciseNames(updatedNames);
-        }
-        
-        return newLog;
-      });
-      return updated;
-    });
+    setLogs((prev) => prev.map((l) => (l.id !== exerciseId ? l : { ...l, ...patch })));
   };
 
   const addSet = (exerciseId: string) =>
@@ -331,26 +358,39 @@ export default function WorkoutLogPage() {
               {/* 운동명 (기존 "기구") */}
               <div className="md:col-span-4">
                 <label className="mb-1 block text-xs font-medium text-gray-600">운동명</label>
-                <input
-                  type="text"
-                  list={`exercise-names-${log.id}`}
-                  value={log.exerciseName}
-                  onChange={(e) => updateExercise(log.id, { exerciseName: e.target.value })}
-                  onBlur={(e) => {
-                    // 입력 완료 시 저장
-                    if (e.target.value.trim()) {
-                      saveExerciseName(e.target.value);
-                      setExerciseNames(loadExerciseNames());
-                    }
-                  }}
-                  placeholder="예: 레그프레스, 레그프레스(발 A), 벤치프레스 인클라인"
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                />
+                <div className="flex gap-2">
+                  {/* 운동명 선택/입력 */}
+                  <input
+                    type="text"
+                    list={`exercise-names-${log.id}`}
+                    value={log.exerciseName}
+                    onChange={(e) => updateExercise(log.id, { exerciseName: e.target.value })}
+                    placeholder="예: 렛풀다운"
+                    className="flex-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                  />
+                  {/* 새 운동명 추가 */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (log.exerciseName.trim()) {
+                        addExerciseName(log.exerciseName);
+                      } else {
+                        showToast("운동명을 입력해줘!");
+                      }
+                    }}
+                    className="shrink-0 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                  >
+                    추가!
+                  </button>
+                </div>
                 <datalist id={`exercise-names-${log.id}`}>
                   {exerciseNames.map((name) => (
                     <option key={name} value={name} />
                   ))}
                 </datalist>
+                <p className="mt-1 text-xs text-gray-500">
+                  운동명을 입력하고 <b>추가!</b>를 누르면 다음부터 자동완성으로 뜹니다.
+                </p>
               </div>
 
               {/* 운동설명 (기존 "운동명") */}
@@ -474,7 +514,7 @@ export default function WorkoutLogPage() {
       {/* Toast 메시지 */}
       {toast && (
         <div
-          className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2 text-sm text-white shadow-lg"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black px-4 py-2 text-sm text-white opacity-90 shadow-lg"
           style={{ zIndex: 1000 }}
         >
           {toast}
