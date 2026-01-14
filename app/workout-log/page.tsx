@@ -20,10 +20,13 @@ type SetRow = {
   note?: string;
 };
 
+type ExercisePart = "가슴" | "등" | "하체" | "어깨" | "이두" | "삼두" | "복근";
+
 type ExerciseRow = {
   id: string;
-  machine: string; // 기구/카테고리
-  name: string; // 운동명
+  exercisePart: ExercisePart; // 운동 부위
+  exerciseName: string; // 운동명
+  exerciseDescription: string; // 운동설명
   sets: SetRow[];
 };
 
@@ -41,14 +44,16 @@ type WorkoutLog = {
 
 const LS_KEYS = {
   MEMBERS: "formpick_members_v1",
-  MACHINES: "formpick_center_machines_v1",
+  EXERCISE_NAMES: "formpick_exercise_names_v1",
   // 운동일지는 memberId+date 로 저장: formpick_workoutlog_v1::<memberId>::<YYYY-MM-DD>
   LOG_PREFIX: "formpick_workoutlog_v1::",
   LOG_INDEX: "formpick_admin_log_index_v1",
 
 };
 
-const DEFAULT_MACHINES = [
+const EXERCISE_PARTS: ExercisePart[] = ["가슴", "등", "하체", "어깨", "이두", "삼두", "복근"];
+
+const DEFAULT_EXERCISE_NAMES = [
   "레그프레스",
   "레그익스텐션",
   "레그컬",
@@ -127,7 +132,8 @@ function buildMemberMessage(log: WorkoutLog) {
   } else {
     lines.push("🏋️‍♂️ 운동 기록");
     log.exercises.forEach((ex, idx) => {
-      lines.push(`\n${idx + 1}) [${ex.machine}] ${ex.name || "운동명 미입력"}`);
+      const desc = ex.exerciseDescription?.trim() ? ` (${ex.exerciseDescription.trim()})` : "";
+      lines.push(`\n${idx + 1}) [${ex.exercisePart}] ${ex.exerciseName || "운동명 미입력"}${desc}`);
       ex.sets.forEach((s, sIdx) => {
         const note = s.note?.trim() ? ` / 메모: ${s.note.trim()}` : "";
         lines.push(`- ${sIdx + 1}세트: ${s.weight || 0}kg x ${s.reps || 0}회 (RPE ${s.rpe || 0})${note}`);
@@ -320,9 +326,9 @@ export default function WorkoutLogPage() {
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberPhone, setNewMemberPhone] = useState("");
 
-  /** machines */
-  const [machines, setMachines] = useState<string[]>(DEFAULT_MACHINES);
-  const [newMachine, setNewMachine] = useState("");
+  /** exercise names */
+  const [exerciseNames, setExerciseNames] = useState<string[]>(DEFAULT_EXERCISE_NAMES);
+  const [newExerciseName, setNewExerciseName] = useState("");
 
   /** log core state */
   const [dateISO, setDateISO] = useState<string>(todayISO());
@@ -350,12 +356,12 @@ export default function WorkoutLogPage() {
     const initialMemberId = (savedMembers[0]?.id || SEED_MEMBERS[0]?.id || "");
     setSelectedMemberId(initialMemberId);
 
-    // machines
-    const savedMachines = safeParse<string[]>(
-      localStorage.getItem(LS_KEYS.MACHINES),
-      DEFAULT_MACHINES
+    // exercise names
+    const savedExerciseNames = safeParse<string[]>(
+      localStorage.getItem(LS_KEYS.EXERCISE_NAMES),
+      DEFAULT_EXERCISE_NAMES
     );
-    setMachines(savedMachines.length ? savedMachines : DEFAULT_MACHINES);
+    setExerciseNames(savedExerciseNames.length ? savedExerciseNames : DEFAULT_EXERCISE_NAMES);
   }, []);
 
   useEffect(() => {
@@ -363,8 +369,8 @@ export default function WorkoutLogPage() {
   }, [members]);
 
   useEffect(() => {
-    localStorage.setItem(LS_KEYS.MACHINES, JSON.stringify(machines));
-  }, [machines]);
+    localStorage.setItem(LS_KEYS.EXERCISE_NAMES, JSON.stringify(exerciseNames));
+  }, [exerciseNames]);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -457,18 +463,18 @@ export default function WorkoutLogPage() {
     showToast("회원 삭제 ✅ (저장된 운동일지는 localStorage에 남아있을 수 있어)");
   }
 
-  /** ===== machine actions ===== */
-  function addMachine() {
-    const name = newMachine.trim();
-    if (!name) return showToast("기구명을 입력해줘!");
-    if (machines.includes(name)) return showToast("이미 등록된 기구야.");
-    setMachines((prev) => [name, ...prev]);
-    setNewMachine("");
-    showToast("기구 추가 완료 ✅");
+  /** ===== exercise name actions ===== */
+  function addExerciseName() {
+    const name = newExerciseName.trim();
+    if (!name) return showToast("운동명을 입력해줘!");
+    if (exerciseNames.includes(name)) return showToast("이미 등록된 운동명이야.");
+    setExerciseNames((prev) => [name, ...prev]);
+    setNewExerciseName("");
+    showToast("운동명 추가 완료 ✅");
   }
-  function removeMachine(name: string) {
-    setMachines((prev) => prev.filter((m) => m !== name));
-    showToast("기구 삭제 ✅");
+  function removeExerciseName(name: string) {
+    setExerciseNames((prev) => prev.filter((n) => n !== name));
+    showToast("운동명 삭제 ✅");
   }
 
   /** ===== log actions ===== */
@@ -478,11 +484,12 @@ export default function WorkoutLogPage() {
 
   function addExercise() {
     if (log.attendance === "결석") return showToast("결석이면 운동 기록을 막아둘게!");
-    const firstMachine = machines[0] || "기구";
+    const firstExerciseName = exerciseNames[0] || "";
     const ex: ExerciseRow = {
       id: uid("ex"),
-      machine: firstMachine,
-      name: "",
+      exercisePart: "하체",
+      exerciseName: firstExerciseName,
+      exerciseDescription: "",
       sets: [
         { id: uid("set"), weight: 0, reps: 0, rpe: 7, note: "" },
         { id: uid("set"), weight: 0, reps: 0, rpe: 7, note: "" },
@@ -767,32 +774,32 @@ export default function WorkoutLogPage() {
             </pre>
           </section>
 
-          {/* machines */}
+          {/* exercise names */}
           <section style={card}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
               <div>
-                <div style={{ fontWeight: 800 }}>센터 기구 설정</div>
+                <div style={{ fontWeight: 800 }}>운동명 설정</div>
                 <div style={{ color: "#777", fontSize: 13, marginTop: 4 }}>
-                  기구는 운동 추가 시 선택지로 뜸
+                  운동명은 운동 추가 시 선택지로 뜸
                 </div>
               </div>
 
               <div style={{ display: "flex", gap: 8 }}>
                 <input
                   style={{ ...input, width: 240 }}
-                  value={newMachine}
-                  onChange={(e) => setNewMachine(e.target.value)}
-                  placeholder="기구명 추가 (예: 힙쓰러스트)"
+                  value={newExerciseName}
+                  onChange={(e) => setNewExerciseName(e.target.value)}
+                  placeholder="운동명 추가 (예: 힙쓰러스트)"
                 />
-                <button onClick={addMachine} style={btnPrimary}>+ 추가</button>
+                <button onClick={addExerciseName} style={btnPrimary}>+ 추가</button>
               </div>
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-              {machines.map((m) => (
-                <span key={m} style={chip}>
-                  {m}
-                  <button onClick={() => removeMachine(m)} style={chipX} aria-label="remove">×</button>
+              {exerciseNames.map((name) => (
+                <span key={name} style={chip}>
+                  {name}
+                  <button onClick={() => removeExerciseName(name)} style={chipX} aria-label="remove">×</button>
                 </span>
               ))}
             </div>
@@ -809,7 +816,7 @@ export default function WorkoutLogPage() {
                   </div>
                 ) : (
                   <div style={{ color: "#777", fontSize: 13, marginTop: 4 }}>
-                    운동명/기구 선택 → 세트별 무게/횟수/RPE 입력
+                    운동 부위/운동명/운동설명 입력 → 세트별 무게/횟수/RPE 입력
                   </div>
                 )}
               </div>
@@ -824,26 +831,42 @@ export default function WorkoutLogPage() {
                   <div key={ex.id} style={{ ...card, background: "#fafafa" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flex: "1 1 520px" }}>
-                        <label style={{ ...field, minWidth: 220, flex: "1 1 220px" }}>
-                          <div style={label}>기구</div>
+                        <label style={{ ...field, minWidth: 140, flex: "1 1 140px" }}>
+                          <div style={label}>운동 부위</div>
                           <select
                             style={input}
-                            value={ex.machine}
-                            onChange={(e) => updateExercise(ex.id, { machine: e.target.value })}
+                            value={ex.exercisePart}
+                            onChange={(e) => updateExercise(ex.id, { exercisePart: e.target.value as ExercisePart })}
                           >
-                            {machines.map((m) => (
-                              <option key={m} value={m}>{m}</option>
+                            {EXERCISE_PARTS.map((part) => (
+                              <option key={part} value={part}>{part}</option>
                             ))}
                           </select>
                         </label>
 
-                        <label style={{ ...field, minWidth: 260, flex: "2 1 260px" }}>
+                        <label style={{ ...field, minWidth: 200, flex: "1 1 200px" }}>
                           <div style={label}>운동명</div>
                           <input
                             style={input}
-                            value={ex.name}
-                            onChange={(e) => updateExercise(ex.id, { name: e.target.value })}
-                            placeholder="예: 레그프레스 (발 위치 A)"
+                            list={`exercise-names-${ex.id}`}
+                            value={ex.exerciseName}
+                            onChange={(e) => updateExercise(ex.id, { exerciseName: e.target.value })}
+                            placeholder="선택하거나 입력하세요"
+                          />
+                          <datalist id={`exercise-names-${ex.id}`}>
+                            {exerciseNames.map((name) => (
+                              <option key={name} value={name} />
+                            ))}
+                          </datalist>
+                        </label>
+
+                        <label style={{ ...field, minWidth: 260, flex: "2 1 260px" }}>
+                          <div style={label}>운동설명</div>
+                          <input
+                            style={input}
+                            value={ex.exerciseDescription}
+                            onChange={(e) => updateExercise(ex.id, { exerciseDescription: e.target.value })}
+                            placeholder="예) 발 위치 A / 무릎 각도 90도"
                           />
                         </label>
                       </div>
