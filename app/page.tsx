@@ -46,13 +46,24 @@ type RecentLogItem = {
   updatedAt: string;
 };
 
+type Member = {
+  id: string;
+  name: string;
+  phone?: string;
+};
+
 const LS_KEYS = {
+  MEMBERS: "formpick_members_v1",
   EVENTS: "formpick_schedule_events_v1",
   CHANGES: "formpick_admin_changes_v1",
   NOTIFICATIONS: "formpick_admin_notifications_v1",
   // 아직 자동으로 안 만들었으면 비어있을 수 있음 (나중에 workout-log 쪽에서 인덱싱 붙이면 살아남)
   LOG_INDEX: "formpick_admin_log_index_v1",
 };
+
+function uid(prefix = "id") {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
 
 function safeParse<T>(v: string | null, fallback: T): T {
   try {
@@ -200,13 +211,44 @@ export default function AdminHome() {
   const [changes, setChanges] = useState<ChangeItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [recentLogs, setRecentLogs] = useState<RecentLogItem[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [newMemberName, setNewMemberName] = useState("");
+  const [newMemberPhone, setNewMemberPhone] = useState("");
+  const [toast, setToast] = useState("");
 
   useEffect(() => {
     setEvents(safeParse<ScheduleEvent[]>(localStorage.getItem(LS_KEYS.EVENTS), []));
     setChanges(safeParse<ChangeItem[]>(localStorage.getItem(LS_KEYS.CHANGES), []));
     setNotifications(safeParse<NotificationItem[]>(localStorage.getItem(LS_KEYS.NOTIFICATIONS), []));
     setRecentLogs(safeParse<RecentLogItem[]>(localStorage.getItem(LS_KEYS.LOG_INDEX), []));
+    setMembers(safeParse<Member[]>(localStorage.getItem(LS_KEYS.MEMBERS), []));
   }, []);
+
+  useEffect(() => {
+    if (members.length > 0) {
+      localStorage.setItem(LS_KEYS.MEMBERS, JSON.stringify(members));
+    }
+  }, [members]);
+
+  function showToastMessage(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(""), 2000);
+  }
+
+  function addMember() {
+    const name = newMemberName.trim();
+    if (!name) {
+      showToastMessage("회원 이름을 입력해줘!");
+      return;
+    }
+    const member: Member = { id: uid("m"), name, phone: newMemberPhone.trim() || undefined };
+    setMembers((prev) => [member, ...prev]);
+    setNewMemberName("");
+    setNewMemberPhone("");
+    setShowAddMemberModal(false);
+    showToastMessage("회원 추가 완료 ✅");
+  }
 
   const countsByDate = useMemo(() => {
     const map: Record<string, number> = {};
@@ -223,6 +265,34 @@ export default function AdminHome() {
     const { y, m1 } = parseISO(t);
     const prefix = `${y}-${String(m1).padStart(2, "0")}-`;
     return events.filter((e) => e.status !== "취소" && e.dateISO.startsWith(prefix)).length;
+  }, [events]);
+
+  // 월간 리포트 계산
+  const monthReport = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m1 = now.getMonth() + 1;
+    const prefix = `${y}-${String(m1).padStart(2, "0")}-`;
+
+    const monthEvents = events.filter((e) => e.dateISO.startsWith(prefix));
+    const monthCanceled = monthEvents.filter((e) => e.status === "취소").length;
+    const monthCompleted = monthEvents.filter((e) => e.status === "완료").length;
+    const monthAll = monthEvents.length;
+
+    const cancelRate = monthAll === 0 ? 0 : Math.round((monthCanceled / monthAll) * 100);
+
+    const topMembers = Object.entries(
+      monthEvents
+        .filter((e) => e.status === "완료")
+        .reduce<Record<string, number>>((acc, e) => {
+          acc[e.memberName] = (acc[e.memberName] || 0) + 1;
+          return acc;
+        }, {})
+    )
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+
+    return { y, m1, monthAll, monthCompleted, cancelRate, topMembers };
   }, [events]);
 
   const todayCount = useMemo(() => countsByDate[todayISO()] || 0, [countsByDate]);
@@ -255,7 +325,7 @@ export default function AdminHome() {
       </header>
 
       {/* quick cards */}
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 16 }}>
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12, marginTop: 16 }}>
         <QuickCard title="신청/변경" desc="최근 요청을 빠르게 확인" right={<span style={pill}>{changes.length}건</span>} href="/schedule" />
         <QuickCard
           title="수업 신청 알림"
@@ -264,6 +334,16 @@ export default function AdminHome() {
           href="/notifications"
         />
         <QuickCard title="수업 기록" desc="운동일지 작성/전송" right={<span style={pill}>바로가기</span>} href="/workout-log" />
+        <div
+          onClick={() => setShowAddMemberModal(true)}
+          style={{ ...cardLink, cursor: "pointer" }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+            <div style={{ fontWeight: 900, fontSize: 16 }}>회원 추가</div>
+            <span style={pill}>{members.length}명</span>
+          </div>
+          <div style={{ color: "#666", fontSize: 13, marginTop: 6 }}>새 회원 등록하기</div>
+        </div>
       </section>
 
       {/* main layout: calendar + old dashboard blocks */}
@@ -297,6 +377,50 @@ export default function AdminHome() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+
+          {/* 월간 리포트 */}
+          <div style={panel}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 16 }}>월간 리포트</div>
+                <div style={{ color: "#777", fontSize: 13, marginTop: 4 }}>
+                  {monthReport.y}년 {monthReport.m1}월
+                </div>
+              </div>
+              <Link href="/schedule" style={linkBtn}>일정 보기</Link>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 12 }}>
+              <div style={statCard}>
+                <div style={statLabel}>이번 달 수업(전체)</div>
+                <div style={statValue}>{monthReport.monthAll}건</div>
+              </div>
+              <div style={statCard}>
+                <div style={statLabel}>완료</div>
+                <div style={statValue}>{monthReport.monthCompleted}건</div>
+              </div>
+              <div style={statCard}>
+                <div style={statLabel}>취소율</div>
+                <div style={statValue}>{monthReport.cancelRate}%</div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 900 }}>회원별 출석 TOP</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+                {monthReport.topMembers.length === 0 ? (
+                  <div style={{ color: "#777" }}>이번 달 완료 수업이 아직 없어.</div>
+                ) : (
+                  monthReport.topMembers.map(([name, cnt]) => (
+                    <div key={name} style={row}>
+                      <div style={{ fontWeight: 900 }}>{name}</div>
+                      <span style={pill}>{cnt}회</span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
 
@@ -386,6 +510,122 @@ export default function AdminHome() {
           </div>
         </div>
       </section>
+
+      {/* Add Member Modal */}
+      {showAddMemberModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setShowAddMemberModal(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 18,
+              padding: 24,
+              maxWidth: 400,
+              width: "90%",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>회원 추가</h2>
+              <button
+                onClick={() => setShowAddMemberModal(false)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: "#666",
+                  padding: 0,
+                  width: 32,
+                  height: 32,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <label style={field}>
+                <div style={label}>회원 이름 *</div>
+                <input
+                  style={input}
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  placeholder="예: 홍길동"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      addMember();
+                    }
+                  }}
+                  autoFocus
+                />
+              </label>
+
+              <label style={field}>
+                <div style={label}>전화번호 (선택)</div>
+                <input
+                  style={input}
+                  value={newMemberPhone}
+                  onChange={(e) => setNewMemberPhone(e.target.value)}
+                  placeholder="예: 010-1234-5678"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      addMember();
+                    }
+                  }}
+                />
+              </label>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button onClick={addMember} style={{ ...btnPrimary, flex: 1 }}>
+                  추가하기
+                </button>
+                <button onClick={() => setShowAddMemberModal(false)} style={btnOutline}>
+                  취소
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#111",
+            color: "#fff",
+            padding: "10px 14px",
+            borderRadius: 999,
+            fontSize: 13,
+            opacity: 0.92,
+            zIndex: 1001,
+          }}
+        >
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -517,4 +757,23 @@ const pill: React.CSSProperties = {
   borderRadius: 999,
   fontSize: 12,
   fontWeight: 800,
+};
+
+const statCard: React.CSSProperties = {
+  border: "1px solid #f0f0f0",
+  borderRadius: 16,
+  padding: 12,
+  background: "#fff",
+};
+const statLabel: React.CSSProperties = { color: "#777", fontSize: 13 };
+const statValue: React.CSSProperties = { fontWeight: 900, fontSize: 18, marginTop: 6 };
+
+const field: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 6 };
+const label: React.CSSProperties = { fontSize: 13, color: "#666" };
+
+const input: React.CSSProperties = {
+  border: "1px solid #e6e6e6",
+  borderRadius: 12,
+  padding: "10px 12px",
+  outline: "none",
 };

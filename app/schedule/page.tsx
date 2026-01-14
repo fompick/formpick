@@ -18,6 +18,7 @@ type ScheduleEvent = {
   durationMin: number; // default 50
   status: "신청" | "확정" | "완료" | "취소";
   note?: string;
+  deducted?: boolean;
   createdAt: string; // ISO
   updatedAt: string; // ISO
 };
@@ -73,6 +74,58 @@ const TIME_OPTIONS = [
   "07:00", "07:30",
   "06:00", "06:30",
 ];
+
+const MEMBER_V2_KEY = "formpick_members_v2";
+
+type PassHistoryItem = {
+  id: string;
+  createdAt: string;
+  type: "구매" | "차감" | "환불" | "수정";
+  amount: number;
+  memo?: string;
+  ref?: string;
+};
+
+type MemberV2 = {
+  id: string;
+  name: string;
+  phone?: string;
+  remainingPT: number;
+  expiryDate: string;
+  history: PassHistoryItem[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+function loadMembersV2(): MemberV2[] {
+  try {
+    return JSON.parse(localStorage.getItem(MEMBER_V2_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+function saveMembersV2(members: MemberV2[]) {
+  localStorage.setItem(MEMBER_V2_KEY, JSON.stringify(members));
+}
+function addMemberHistory(memberId: string, item: Omit<PassHistoryItem, "id" | "createdAt">) {
+  const members = loadMembersV2();
+  const next = members.map((m) => {
+    if (m.id !== memberId) return m;
+    const h: PassHistoryItem = { id: uid("his"), createdAt: new Date().toISOString(), ...item };
+    return { ...m, history: [h, ...(m.history || [])], updatedAt: new Date().toISOString() };
+  });
+  saveMembersV2(next);
+}
+function changeRemainingPT(memberId: string, delta: number, memo: string, ref?: string) {
+  const members = loadMembersV2();
+  const next = members.map((m) => {
+    if (m.id !== memberId) return m;
+    const remaining = Math.max(0, (m.remainingPT || 0) + delta);
+    return { ...m, remainingPT: remaining, updatedAt: new Date().toISOString() };
+  });
+  saveMembersV2(next);
+  addMemberHistory(memberId, { type: delta < 0 ? "차감" : "환불", amount: delta, memo, ref });
+}
 
 function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -406,6 +459,30 @@ export default function SchedulePage() {
 
     const beforeTime = current.time;
     const afterTime = time;
+    const beforeStatus = current.status;
+    const afterStatus = status; // 폼에서 선택한 상태
+
+    // ✅ 완료 처리 시 1회 차감 (중복 방지: ev.deducted)
+    if (beforeStatus !== "완료" && afterStatus === "완료") {
+      setEvents((prev) =>
+        prev.map((e) => (e.id === editingId ? { ...e, deducted: true } : e))
+      );
+
+      // 회원권 차감
+      changeRemainingPT(current.memberId, -1, `수업 완료 차감 (${current.dateISO} ${current.time})`, current.id);
+    }
+
+    // ✅ 완료 -> 다른 상태로 변경 시 환불(원하면 유지)
+    // 만약 "환불은 수동으로만" 하고 싶으면 이 블록을 지워도 됨.
+    if (beforeStatus === "완료" && afterStatus !== "완료") {
+      const wasDeducted = Boolean(current.deducted);
+      if (wasDeducted) {
+        setEvents((prev) =>
+          prev.map((e) => (e.id === editingId ? { ...e, deducted: false } : e))
+        );
+        changeRemainingPT(current.memberId, +1, `완료 취소 환불 (${current.dateISO} ${current.time})`, current.id);
+      }
+    }
 
     setEvents((prev) =>
       prev.map((e) => {
