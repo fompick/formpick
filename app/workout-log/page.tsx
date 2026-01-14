@@ -160,6 +160,50 @@ function logStorageKey(memberId: string, dateISO: string) {
   return `${LS_KEYS.LOG_PREFIX}${memberId}::${dateISO}`;
 }
 
+/** Migrate old exercise format to new format */
+function migrateExerciseRow(ex: any): ExerciseRow {
+  // 이미 새 형식이면 그대로 반환
+  if (ex.exercisePart && typeof ex.exerciseName === "string" && typeof ex.exerciseDescription === "string") {
+    return {
+      id: ex.id,
+      exercisePart: ex.exercisePart as ExercisePart,
+      exerciseName: ex.exerciseName,
+      exerciseDescription: ex.exerciseDescription,
+      sets: ex.sets || [],
+    };
+  }
+  
+  // 기존 형식 (machine, name)을 새 형식으로 변환
+  return {
+    id: ex.id || uid("ex"),
+    exercisePart: "하체" as ExercisePart, // 기본값
+    exerciseName: ex.machine || "",
+    exerciseDescription: ex.name || "",
+    sets: (ex.sets || []).map((s: any) => ({
+      id: s.id || uid("set"),
+      weight: Number(s.weight) || 0,
+      reps: Number(s.reps) || 0,
+      rpe: Number(s.rpe) || 7,
+      note: s.note || "",
+    })),
+  };
+}
+
+/** Migrate old WorkoutLog format to new format */
+function migrateWorkoutLog(log: any): WorkoutLog {
+  return {
+    memberId: log.memberId || "",
+    memberName: log.memberName || "",
+    dateISO: log.dateISO || todayISO(),
+    attendance: log.attendance || "출석",
+    focus: log.focus || "",
+    coachNote: log.coachNote || "",
+    exercises: (log.exercises || []).map(migrateExerciseRow),
+    createdAt: log.createdAt || new Date().toISOString(),
+    updatedAt: log.updatedAt || new Date().toISOString(),
+  };
+}
+
 function upsertLogIndexItem(args: {
   memberId: string;
   memberName: string;
@@ -356,12 +400,21 @@ export default function WorkoutLogPage() {
     const initialMemberId = (savedMembers[0]?.id || SEED_MEMBERS[0]?.id || "");
     setSelectedMemberId(initialMemberId);
 
-    // exercise names
+    // exercise names - 기존 MACHINES 키에서 마이그레이션
+    const oldMachines = safeParse<string[]>(
+      localStorage.getItem("formpick_center_machines_v1"),
+      []
+    );
     const savedExerciseNames = safeParse<string[]>(
       localStorage.getItem(LS_KEYS.EXERCISE_NAMES),
-      DEFAULT_EXERCISE_NAMES
+      oldMachines.length > 0 ? oldMachines : DEFAULT_EXERCISE_NAMES
     );
     setExerciseNames(savedExerciseNames.length ? savedExerciseNames : DEFAULT_EXERCISE_NAMES);
+    
+    // 마이그레이션 완료 후 기존 키 삭제 (선택사항)
+    if (oldMachines.length > 0 && !localStorage.getItem(LS_KEYS.EXERCISE_NAMES)) {
+      localStorage.setItem(LS_KEYS.EXERCISE_NAMES, JSON.stringify(oldMachines));
+    }
   }, []);
 
   useEffect(() => {
@@ -397,11 +450,13 @@ export default function WorkoutLogPage() {
     const mName = m?.name || "";
 
     const key = logStorageKey(selectedMemberId, dateISO);
-    const saved = safeParse<WorkoutLog | null>(localStorage.getItem(key), null);
+    const saved = safeParse<any>(localStorage.getItem(key), null);
 
     if (saved) {
+      // 기존 데이터 마이그레이션
+      const migrated = migrateWorkoutLog(saved);
       // 혹시 이름 바뀌었으면 반영
-      setLog({ ...saved, memberId: selectedMemberId, memberName: mName, dateISO });
+      setLog({ ...migrated, memberId: selectedMemberId, memberName: mName, dateISO });
     } else {
       // 새로 생성
       setLog({
